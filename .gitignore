@@ -157,3 +157,7 @@ Desktop.ini
 
 # pdf
 *.pdf
+
+# excels
+*.xlsx
+*.csv

@@ -53,8 +53,10 @@ def load_data():
         df = df.dropna(subset=["lat", "lon"])
 
         # Limpiar columnas de texto
+        df["gestor_red"] = df["gestor_red"].astype(str).str.strip()
         df["provincia"] = df["provincia"].astype(str).str.strip()
         df["municipio"] = df["municipio"].astype(str).str.strip()
+        df["subestacion_nombre"] = df["subestacion_nombre"].astype(str).str.strip()
         df["subestacion"] = df["subestacion"].astype(str).str.strip()
 
         # Calcular porcentaje disponible de forma segura
@@ -120,20 +122,29 @@ if df is not None:
     # Filtros en el sidebar
     st.sidebar.subheader("Filtros")
 
+    # Filtro por gestor de red (NUEVO)
+    gestores_unicos = df["gestor_red"].dropna().unique().tolist()
+    gestores = ["Todos"] + sorted([str(g) for g in gestores_unicos if g and str(g) != "nan"])
+    gestor_seleccionado = st.sidebar.selectbox("Gestor de Red:", gestores)
+
+    # Filtrar datos por gestor de red
+    if gestor_seleccionado != "Todos":
+        df_filtrado = df[df["gestor_red"] == gestor_seleccionado]
+    else:
+        df_filtrado = df.copy()
+
     # Filtro por provincia
-    provincias_unicas = df["provincia"].dropna().unique().tolist()
-    provincias = ["Todas"] + sorted([str(p) for p in provincias_unicas if p])
+    provincias_unicas = df_filtrado["provincia"].dropna().unique().tolist()
+    provincias = ["Todas"] + sorted([str(p) for p in provincias_unicas if p and str(p) != "nan"])
     provincia_seleccionada = st.sidebar.selectbox("Provincia:", provincias)
 
     # Filtrar datos por provincia
     if provincia_seleccionada != "Todas":
-        df_filtrado = df[df["provincia"] == provincia_seleccionada]
-    else:
-        df_filtrado = df.copy()
+        df_filtrado = df_filtrado[df_filtrado["provincia"] == provincia_seleccionada]
 
     # Filtro por municipio
     municipios_unicos = df_filtrado["municipio"].dropna().unique().tolist()
-    municipios = ["Todos"] + sorted([str(m) for m in municipios_unicos if m])
+    municipios = ["Todos"] + sorted([str(m) for m in municipios_unicos if m and str(m) != "nan"])
     municipio_seleccionado = st.sidebar.selectbox("Municipio:", municipios)
 
     if municipio_seleccionado != "Todos":
@@ -202,15 +213,15 @@ if df is not None:
             color = get_color(row["porcentaje_disponible"])
             radius = calculate_radius(row["cap_total"], min_cap, max_cap)
 
-            # Crear popup con información
+            # Crear popup con información (actualizado con nuevos campos)
             popup_text = f"""
             <div style="width: 300px;">
-                <h4>{row['subestacion']}</h4>
+                <h4>{row['subestacion_nombre']}</h4>
                 <hr>
+                <b>🏢 Gestor de Red:</b> {row['gestor_red']}<br>
                 <b>📍 Ubicación:</b> {row['provincia']}, {row['municipio']}<br>
-                <b>🆔 ID Subestación:</b> {row['id_subestacion']}<br>
+                <b>🆔 ID Subestación:</b> {row['subestacion']}<br>
                 <b>⚡ Tensión:</b> {row['kv']} kV<br>
-                <b>🔌 Punto de conexión:</b> {row['punto_conexion']}<br>
                 <hr>
                 <b>📊 Capacidades (MVA):</b><br>
                 • Total: {row['cap_total']:.2f}<br>
@@ -220,7 +231,7 @@ if df is not None:
                 • No evaluada: {row['cap_no_eval']:.2f}<br>
                 <hr>
                 <b>📈 Disponibilidad:</b> {row['porcentaje_disponible']:.1f}%<br>
-                {f"<b>💬 Comentario:</b> {row['comentario']}<br>" if pd.notna(row['comentario']) and row['comentario'] != '' else ""}
+                {f"<b>💬 Comentarios:</b> {row['comentarios']}<br>" if pd.notna(row['comentarios']) and str(row['comentarios']) not in ['', 'nan', 'NaN'] else ""}
             </div>
             """
 
@@ -233,7 +244,7 @@ if df is not None:
                 weight=1,
                 fillColor=color,
                 fillOpacity=0.7,
-                tooltip=f"{row['subestacion']} - {row['porcentaje_disponible']:.1f}% disponible",
+                tooltip=f"{row['subestacion_nombre']} - {row['porcentaje_disponible']:.1f}% disponible",
             ).add_to(m)
 
         # Agregar plugin de pantalla completa
@@ -243,19 +254,17 @@ if df is not None:
         st.title("Mapa de Subestaciones Eléctricas")
 
         # Información sobre los filtros aplicados
-        if (
-            provincia_seleccionada != "Todas"
-            or municipio_seleccionado != "Todos"
-            or kv_seleccionado != "Todos"
-        ):
-            filtros_activos = []
-            if provincia_seleccionada != "Todas":
-                filtros_activos.append(f"Provincia: {provincia_seleccionada}")
-            if municipio_seleccionado != "Todos":
-                filtros_activos.append(f"Municipio: {municipio_seleccionado}")
-            if kv_seleccionado != "Todos":
-                filtros_activos.append(f"Tensión: {kv_seleccionado} kV")
+        filtros_activos = []
+        if gestor_seleccionado != "Todos":
+            filtros_activos.append(f"Gestor: {gestor_seleccionado}")
+        if provincia_seleccionada != "Todas":
+            filtros_activos.append(f"Provincia: {provincia_seleccionada}")
+        if municipio_seleccionado != "Todos":
+            filtros_activos.append(f"Municipio: {municipio_seleccionado}")
+        if kv_seleccionado != "Todos":
+            filtros_activos.append(f"Tensión: {kv_seleccionado} kV")
 
+        if filtros_activos:
             st.info(f"🔍 Filtros activos: {' | '.join(filtros_activos)}")
 
         # Mostrar mapa con altura ajustada
@@ -272,23 +281,36 @@ if df is not None:
             )
             punto_cercano = df_filtrado.loc[df_filtrado["distancia"].idxmin()]
 
-            st.subheader(f"📍 Información detallada: {punto_cercano['subestacion']}")
+            st.subheader(f"📍 Información detallada: {punto_cercano['subestacion_nombre']}")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
 
             with col1:
+                st.metric(label="Gestor de Red", value=punto_cercano["gestor_red"])
                 st.metric(label="Capacidad Total", value=f"{punto_cercano['cap_total']:.2f} MVA")
-                st.metric(label="Tensión", value=f"{punto_cercano['kv']} kV")
 
             with col2:
-                st.metric(
-                    label="Disponibilidad", value=f"{punto_cercano['porcentaje_disponible']:.1f}%"
-                )
+                st.metric(label="Tensión", value=f"{punto_cercano['kv']} kV")
                 st.metric(label="Cap. Disponible", value=f"{punto_cercano['cap_disp']:.2f} MVA")
 
             with col3:
+                st.metric(
+                    label="Disponibilidad", value=f"{punto_cercano['porcentaje_disponible']:.1f}%"
+                )
                 st.metric(label="Cap. Ocupada", value=f"{punto_cercano['cap_ocup']:.2f} MVA")
-                st.metric(label="Ubicación", value=f"{punto_cercano['municipio']}")
+
+            with col4:
+                st.metric(label="Provincia", value=punto_cercano["provincia"])
+                st.metric(label="Municipio", value=punto_cercano["municipio"])
+
+            # Mostrar comentarios si existen
+            if pd.notna(punto_cercano["comentarios"]) and str(punto_cercano["comentarios"]) not in [
+                "",
+                "nan",
+                "NaN",
+            ]:
+                st.subheader("💬 Comentarios")
+                st.info(punto_cercano["comentarios"])
 
     else:
         st.warning("⚠️ No hay datos que coincidan con los filtros seleccionados.")
@@ -299,7 +321,7 @@ else:
         "❌ No se pudieron cargar los datos. Verifica que el archivo 'data.csv' esté presente."
     )
     st.info(
-        "📋 El archivo debe tener las siguientes columnas: provincia, municipio, lat, lon, subestacion, kv, cap_total, cap_disp, cap_ocup, porcentaje_disponible, etc."
+        "📋 El archivo debe tener las siguientes columnas: gestor_red, provincia, municipio, lat, lon, subestacion_nombre, subestacion, kv, cap_total, cap_disp, cap_ocup, cap_comp, cap_no_eval, comentarios, etc."
     )
 
 # Footer
